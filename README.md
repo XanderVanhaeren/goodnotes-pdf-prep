@@ -12,7 +12,7 @@ A browser-based tool that prepares PDFs for [Goodnotes](https://www.goodnotes.co
 
 ## Tech stack
 
-React 19, Vite, [pdf-lib](https://pdf-lib.js.org/) (writing), [pdf.js](https://mozilla.github.io/pdf.js/) (reading), Framer Motion, lucide-react. Linted with oxlint.
+React 19, Vite, [pdf-lib](https://pdf-lib.js.org/) (writing), [pdf.js](https://mozilla.github.io/pdf.js/) (reading), lucide-react. Linted with oxlint.
 
 ## Getting started
 

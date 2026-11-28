@@ -1,22 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  BookOpen,
   Check,
-  ChevronDown,
-  ChevronRight,
   Download,
-  Eye,
-  EyeOff,
-  FileText,
-  Grid3X3,
-  ListTree,
   LoaderCircle,
-  Lock,
   RotateCcw,
-  Settings2,
-  Trash2,
   Upload,
+  X,
 } from "lucide-react";
 
 import {
@@ -74,6 +64,147 @@ const formatFileSize = (bytes) => {
 };
 
 const copyArrayBuffer = (arrayBuffer) => arrayBuffer.slice(0);
+
+/* -------------------------------------------------------------------------- */
+/*                       Paper color & thickness presets                      */
+/* -------------------------------------------------------------------------- */
+
+const DEFAULT_BACKGROUND_COLOR = "#F1F1F1";
+
+const BACKGROUND_PRESETS = [
+  { id: "soft-white", label: "Soft white", hex: "#F1F1F1" },
+  { id: "white", label: "Pure white", hex: "#FFFFFF" },
+  { id: "warm-paper", label: "Warm paper", hex: "#F5F1E6" },
+  { id: "grey", label: "Cool grey", hex: "#DCDFE4" },
+  { id: "dark-grey", label: "Dark grey", hex: "#26272B" },
+  { id: "charcoal", label: "Charcoal", hex: "#16171A" },
+];
+
+const LIGHT_PATTERN_PRESETS = [
+  { id: "slate-blue", label: "Greyish blue", hex: "#7E94AB" },
+  { id: "dark-gray", label: "Dark gray", hex: "#222428" },
+  { id: "soft-purple", label: "Soft purple", hex: "#9485B8" },
+  { id: "subtle-gray", label: "Subtle gray", hex: "#A4AAB3" },
+  { id: "sage", label: "Muted sage", hex: "#7E9B8C" },
+  { id: "warm-taupe", label: "Warm taupe", hex: "#AD9A86" },
+];
+
+const DARK_PATTERN_PRESETS = [
+  { id: "slate-blue", label: "Greyish blue", hex: "#6E87A1" },
+  { id: "dark-gray", label: "Off-white", hex: "#D4D7DD" },
+  { id: "soft-purple", label: "Soft purple", hex: "#9D8DC4" },
+  { id: "subtle-gray", label: "Subtle gray", hex: "#545963" },
+  { id: "sage", label: "Muted sage", hex: "#719684" },
+  { id: "warm-taupe", label: "Warm sand", hex: "#A89680" },
+];
+
+const THICKNESS_OPTIONS = [
+  {
+    value: "thin",
+    label: "thin",
+    lineWidthPt: 0.25,
+    dotRadiusPt: 0.6,
+    previewLinePx: 1,
+    previewAlpha: 0.72,
+    previewDotPx: 1,
+  },
+  {
+    value: "regular",
+    label: "regular",
+    lineWidthPt: 0.45,
+    dotRadiusPt: 0.9,
+    previewLinePx: 1.25,
+    previewAlpha: 0.94,
+    previewDotPx: 1.4,
+  },
+  {
+    value: "medium",
+    label: "medium",
+    lineWidthPt: 0.8,
+    dotRadiusPt: 1.3,
+    previewLinePx: 1.75,
+    previewAlpha: 1,
+    previewDotPx: 1.9,
+  },
+  {
+    value: "thick",
+    label: "thick",
+    lineWidthPt: 1.25,
+    dotRadiusPt: 1.8,
+    previewLinePx: 2.5,
+    previewAlpha: 1,
+    previewDotPx: 2.5,
+  },
+];
+
+const normalizeHex = (value = "") => {
+  const cleaned = String(value).trim().replace(/^#/, "");
+
+  if (/^[0-9a-fA-F]{3}$/.test(cleaned)) {
+    return `#${cleaned
+        .split("")
+        .map((channel) => channel + channel)
+        .join("")
+        .toUpperCase()}`;
+  }
+
+  if (/^[0-9a-fA-F]{6}$/.test(cleaned)) {
+    return `#${cleaned.toUpperCase()}`;
+  }
+
+  return null;
+};
+
+const hexToRgb255 = (hex) => {
+  const normalized = normalizeHex(hex) ?? "#000000";
+
+  return {
+    r: Number.parseInt(normalized.slice(1, 3), 16),
+    g: Number.parseInt(normalized.slice(3, 5), 16),
+    b: Number.parseInt(normalized.slice(5, 7), 16),
+  };
+};
+
+const hexToRgba = (hex, alpha = 1) => {
+  const { r, g, b } = hexToRgb255(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+const hexToPdfRgb = (hex) => {
+  const { r, g, b } = hexToRgb255(hex);
+  return rgb(r / 255, g / 255, b / 255);
+};
+
+const getRelativeLuminance = (hex) => {
+  const { r, g, b } = hexToRgb255(hex);
+  const toLinear = (channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.03928
+        ? normalized / 12.92
+        : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+
+  return (
+      0.2126 * toLinear(r) +
+      0.7152 * toLinear(g) +
+      0.0722 * toLinear(b)
+  );
+};
+
+/*
+ * WCAG contrast midpoint (~0.179) splits colors where white ink reads better
+ * than dark ink.
+ */
+const isDarkColor = (hex) => getRelativeLuminance(hex) < 0.18;
+
+const getContrastRatio = (hexA, hexB) => {
+  const luminanceA = getRelativeLuminance(hexA);
+  const luminanceB = getRelativeLuminance(hexB);
+  const lighter = Math.max(luminanceA, luminanceB);
+  const darker = Math.min(luminanceA, luminanceB);
+
+  return (lighter + 0.05) / (darker + 0.05);
+};
 
 /* -------------------------------------------------------------------------- */
 /*                           Heading detection logic                           */
@@ -179,6 +310,239 @@ function groupTextItemsIntoLines(items) {
       .sort((leftLine, rightLine) => rightLine.y - leftLine.y);
 }
 
+async function extractExistingOutline(
+    pdfBytes,
+    onProgress = () => {},
+) {
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(copyArrayBuffer(pdfBytes)),
+    disableFontFace: true,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+  });
+
+  const pdf = await loadingTask.promise;
+
+  try {
+    const sourceOutline = await pdf.getOutline();
+
+    console.log("Raw PDF outline:", sourceOutline);
+
+    if (
+        !Array.isArray(sourceOutline) ||
+        sourceOutline.length === 0
+    ) {
+      return [];
+    }
+
+    /*
+     * Build a page-reference lookup table.
+     *
+     * Some PDFs provide outline destinations as indirect PDF references.
+     * Resolving all page references once gives us a reliable fallback when
+     * pdf.getPageIndex() cannot resolve a particular destination directly.
+     */
+    const pageReferenceMap = new Map();
+
+    for (
+        let pageNumber = 1;
+        pageNumber <= pdf.numPages;
+        pageNumber += 1
+    ) {
+      const page = await pdf.getPage(pageNumber);
+      const reference = page.ref;
+
+      if (reference) {
+        const referenceKey =
+            `${reference.num ?? ""}:${reference.gen ?? 0}`;
+
+        pageReferenceMap.set(
+            referenceKey,
+            pageNumber,
+        );
+      }
+
+      if (pageNumber % 25 === 0) {
+        await sleep();
+      }
+    }
+
+    async function resolveDestination(
+        rawDestination,
+    ) {
+      if (!rawDestination) {
+        return null;
+      }
+
+      let destination = rawDestination;
+
+      /*
+       * Named destinations appear as strings. Resolve the name first.
+       */
+      if (typeof destination === "string") {
+        try {
+          destination =
+              await pdf.getDestination(destination);
+        } catch (error) {
+          console.warn(
+              "Could not resolve named destination:",
+              rawDestination,
+              error,
+          );
+
+          return null;
+        }
+      }
+
+      if (
+          !Array.isArray(destination) ||
+          destination.length === 0
+      ) {
+        return null;
+      }
+
+      const pageDestination = destination[0];
+
+      /*
+       * Most outlines use an indirect page reference.
+       */
+      if (
+          pageDestination &&
+          typeof pageDestination === "object"
+      ) {
+        try {
+          const pageIndex =
+              await pdf.getPageIndex(pageDestination);
+
+          if (
+              Number.isInteger(pageIndex) &&
+              pageIndex >= 0
+          ) {
+            return pageIndex + 1;
+          }
+        } catch (error) {
+          /*
+           * Fall through to manual reference matching.
+           */
+          console.warn(
+              "Direct page-index resolution failed:",
+              pageDestination,
+              error,
+          );
+        }
+
+        const referenceKey =
+            `${pageDestination.num ?? ""}:${
+                pageDestination.gen ?? 0
+            }`;
+
+        if (pageReferenceMap.has(referenceKey)) {
+          return pageReferenceMap.get(referenceKey);
+        }
+      }
+
+      /*
+       * Some PDF.js versions expose a direct zero-based page index.
+       */
+      if (
+          Number.isInteger(pageDestination) &&
+          pageDestination >= 0 &&
+          pageDestination < pdf.numPages
+      ) {
+        return pageDestination + 1;
+      }
+
+      return null;
+    }
+
+    const extractedOutline = [];
+    let processedItems = 0;
+
+    async function walkOutline(
+        outlineItems,
+        level = 1,
+    ) {
+      for (const item of outlineItems) {
+        processedItems += 1;
+
+        const pageNumber =
+            await resolveDestination(item.dest);
+
+        /*
+         * Preserve containers even when their destination cannot be
+         * resolved, provided a child destination can be used later.
+         */
+        if (pageNumber !== null) {
+          extractedOutline.push({
+            id: `existing-outline-${processedItems}`,
+            page: pageNumber,
+            level: Math.min(
+                6,
+                Math.max(1, level),
+            ),
+            code: "",
+            title:
+                normalizeLine(item.title) ||
+                `Page ${pageNumber}`,
+            enabled: true,
+          });
+        } else {
+          console.warn(
+              "Outline destination was not resolved:",
+              {
+                title: item.title,
+                destination: item.dest,
+                url: item.url,
+              },
+          );
+        }
+
+        if (
+            Array.isArray(item.items) &&
+            item.items.length > 0
+        ) {
+          await walkOutline(
+              item.items,
+              level + 1,
+          );
+        }
+
+        onProgress(processedItems);
+
+        if (processedItems % 20 === 0) {
+          await sleep();
+        }
+      }
+    }
+
+    await walkOutline(sourceOutline, 1);
+
+    console.log(
+        `Resolved ${extractedOutline.length} outline items`,
+        extractedOutline,
+    );
+
+    /*
+     * Keep the source order. Do not sort by page number because the order
+     * and nesting supplied by the PDF define the bookmark hierarchy.
+     */
+    return extractedOutline;
+  } finally {
+    try {
+      if (
+          typeof loadingTask.destroy === "function"
+      ) {
+        await loadingTask.destroy();
+      }
+    } catch (cleanupError) {
+      console.warn(
+          "PDF.js cleanup did not complete:",
+          cleanupError,
+      );
+    }
+  }
+}
+
 async function detectHeadings(pdfBytes, onProgress) {
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(copyArrayBuffer(pdfBytes)),
@@ -187,238 +551,6 @@ async function detectHeadings(pdfBytes, onProgress) {
     isEvalSupported: false,
   });
 
-  async function extractExistingOutline(
-      pdfBytes,
-      onProgress = () => {},
-  ) {
-    const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(copyArrayBuffer(pdfBytes)),
-      disableFontFace: true,
-      useWorkerFetch: false,
-      isEvalSupported: false,
-    });
-
-    const pdf = await loadingTask.promise;
-
-    try {
-      const sourceOutline = await pdf.getOutline();
-
-      console.log("Raw PDF outline:", sourceOutline);
-
-      if (
-          !Array.isArray(sourceOutline) ||
-          sourceOutline.length === 0
-      ) {
-        return [];
-      }
-
-      /*
-       * Build a page-reference lookup table.
-       *
-       * Some PDFs provide outline destinations as indirect PDF references.
-       * Resolving all page references once gives us a reliable fallback when
-       * pdf.getPageIndex() cannot resolve a particular destination directly.
-       */
-      const pageReferenceMap = new Map();
-
-      for (
-          let pageNumber = 1;
-          pageNumber <= pdf.numPages;
-          pageNumber += 1
-      ) {
-        const page = await pdf.getPage(pageNumber);
-        const reference = page.ref;
-
-        if (reference) {
-          const referenceKey =
-              `${reference.num ?? ""}:${reference.gen ?? 0}`;
-
-          pageReferenceMap.set(
-              referenceKey,
-              pageNumber,
-          );
-        }
-
-        if (pageNumber % 25 === 0) {
-          await sleep();
-        }
-      }
-
-      async function resolveDestination(
-          rawDestination,
-      ) {
-        if (!rawDestination) {
-          return null;
-        }
-
-        let destination = rawDestination;
-
-        /*
-         * Named destinations appear as strings. Resolve the name first.
-         */
-        if (typeof destination === "string") {
-          try {
-            destination =
-                await pdf.getDestination(destination);
-          } catch (error) {
-            console.warn(
-                "Could not resolve named destination:",
-                rawDestination,
-                error,
-            );
-
-            return null;
-          }
-        }
-
-        if (
-            !Array.isArray(destination) ||
-            destination.length === 0
-        ) {
-          return null;
-        }
-
-        const pageDestination = destination[0];
-
-        /*
-         * Most outlines use an indirect page reference.
-         */
-        if (
-            pageDestination &&
-            typeof pageDestination === "object"
-        ) {
-          try {
-            const pageIndex =
-                await pdf.getPageIndex(pageDestination);
-
-            if (
-                Number.isInteger(pageIndex) &&
-                pageIndex >= 0
-            ) {
-              return pageIndex + 1;
-            }
-          } catch (error) {
-            /*
-             * Fall through to manual reference matching.
-             */
-            console.warn(
-                "Direct page-index resolution failed:",
-                pageDestination,
-                error,
-            );
-          }
-
-          const referenceKey =
-              `${pageDestination.num ?? ""}:${
-                  pageDestination.gen ?? 0
-              }`;
-
-          if (pageReferenceMap.has(referenceKey)) {
-            return pageReferenceMap.get(referenceKey);
-          }
-        }
-
-        /*
-         * Some PDF.js versions expose a direct zero-based page index.
-         */
-        if (
-            Number.isInteger(pageDestination) &&
-            pageDestination >= 0 &&
-            pageDestination < pdf.numPages
-        ) {
-          return pageDestination + 1;
-        }
-
-        return null;
-      }
-
-      const extractedOutline = [];
-      let processedItems = 0;
-
-      async function walkOutline(
-          outlineItems,
-          level = 1,
-      ) {
-        for (const item of outlineItems) {
-          processedItems += 1;
-
-          const pageNumber =
-              await resolveDestination(item.dest);
-
-          /*
-           * Preserve containers even when their destination cannot be
-           * resolved, provided a child destination can be used later.
-           */
-          if (pageNumber !== null) {
-            extractedOutline.push({
-              id: `existing-outline-${processedItems}`,
-              page: pageNumber,
-              level: Math.min(
-                  6,
-                  Math.max(1, level),
-              ),
-              code: "",
-              title:
-                  normalizeLine(item.title) ||
-                  `Page ${pageNumber}`,
-              enabled: true,
-            });
-          } else {
-            console.warn(
-                "Outline destination was not resolved:",
-                {
-                  title: item.title,
-                  destination: item.dest,
-                  url: item.url,
-                },
-            );
-          }
-
-          if (
-              Array.isArray(item.items) &&
-              item.items.length > 0
-          ) {
-            await walkOutline(
-                item.items,
-                level + 1,
-            );
-          }
-
-          onProgress(processedItems);
-
-          if (processedItems % 20 === 0) {
-            await sleep();
-          }
-        }
-      }
-
-      await walkOutline(sourceOutline, 1);
-
-      console.log(
-          `Resolved ${extractedOutline.length} outline items`,
-          extractedOutline,
-      );
-
-      /*
-       * Keep the source order. Do not sort by page number because the order
-       * and nesting supplied by the PDF define the bookmark hierarchy.
-       */
-      return extractedOutline;
-    } finally {
-      try {
-        if (
-            typeof loadingTask.destroy === "function"
-        ) {
-          await loadingTask.destroy();
-        }
-      } catch (cleanupError) {
-        console.warn(
-            "PDF.js cleanup did not complete:",
-            cleanupError,
-        );
-      }
-    }
-  }
 
   const pdf = await loadingTask.promise;
 
@@ -733,30 +865,131 @@ function translatePageAnnotations(page, offsetX, offsetY) {
 /*                              React components                              */
 /* -------------------------------------------------------------------------- */
 
-function NumberSetting({
-                         label,
-                         value,
-                         onChange,
-                         suffix = "%",
-                         minimum = 0,
-                         maximum = 100,
-                       }) {
+function MarginField({
+                       label,
+                       value,
+                       onChange,
+                       suffix = "%",
+                       minimum = 0,
+                       maximum = 100,
+                     }) {
   return (
-      <div className="field">
-        <label>{label}</label>
+      <label className="margin-field">
+        <span className="margin-field__label">{label}</span>
 
-        <div className="number-wrap">
+        <span className="margin-field__value">
           <input
               type="number"
               min={minimum}
               max={maximum}
               value={value}
+              aria-label={`${label} margin`}
               onChange={(event) =>
                   onChange(clamp(event.target.value, minimum, maximum))
               }
           />
+          <span className="margin-field__suffix">{suffix}</span>
+        </span>
+      </label>
+  );
+}
 
-          <span className="suffix">{suffix}</span>
+function Segmented({ label, options, value, onChange, disabled = false }) {
+  return (
+      <div className="control-row">
+        <span className="control-row__label">{label}</span>
+
+        <div
+            className={`segmented ${disabled ? "is-disabled" : ""}`}
+            role="radiogroup"
+            aria-label={label}
+        >
+          {options.map((option) => (
+              <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={value === option.value}
+                  className={value === option.value ? "is-active" : ""}
+                  disabled={disabled}
+                  onClick={() => onChange(option.value)}
+              >
+                {option.label}
+              </button>
+          ))}
+        </div>
+      </div>
+  );
+}
+
+function ColorSelector({
+                         label,
+                         presets,
+                         value,
+                         onChange,
+                         disabled = false,
+                         customLabel = "Custom color",
+                         hint = "",
+                       }) {
+  const normalizedValue = normalizeHex(value) ?? "#000000";
+  const isCustom = !presets.some(
+      (preset) => preset.hex.toUpperCase() === normalizedValue,
+  );
+
+  return (
+      <div className="control-row">
+        <span className="control-row__label">
+          {label}
+          {hint ? <small className="control-row__hint">{hint}</small> : null}
+        </span>
+
+        <div
+            className={`color-bar ${disabled ? "is-disabled" : ""}`}
+            role="group"
+            aria-label={label}
+        >
+          <div className="color-swatches">
+            {presets.map((preset) => {
+              const isActive =
+                  preset.hex.toUpperCase() === normalizedValue;
+
+              return (
+                  <button
+                      key={preset.id}
+                      type="button"
+                      className={`color-swatch ${isActive ? "is-active" : ""}`}
+                      style={{ "--swatch": preset.hex }}
+                      disabled={disabled}
+                      aria-label={`${preset.label} (${preset.hex})`}
+                      aria-pressed={isActive}
+                      title={`${preset.label} · ${preset.hex}`}
+                      onClick={() => onChange(preset.hex)}
+                  />
+              );
+            })}
+          </div>
+
+          <label
+              className={`color-custom ${isCustom ? "is-active" : ""} ${
+                  disabled ? "is-disabled" : ""
+              }`}
+              title={`${customLabel} · ${normalizedValue}`}
+          >
+            <input
+                type="color"
+                className="color-custom__input"
+                value={normalizedValue}
+                disabled={disabled}
+                aria-label={customLabel}
+                onChange={(event) => onChange(event.target.value)}
+            />
+            <span
+                className="color-custom__dot"
+                style={{ "--swatch": normalizedValue }}
+                aria-hidden="true"
+            />
+            <span className="color-custom__hex">{normalizedValue}</span>
+          </label>
         </div>
       </div>
   );
@@ -765,31 +998,35 @@ function NumberSetting({
 function Toggle({ enabled, onChange, label, description }) {
   return (
       <div className="toggle-row">
-        <div>
-          <strong>{label}</strong>
+        <div className="toggle-row__text">
+          <span>{label}</span>
           <small>{description}</small>
         </div>
 
         <button
             type="button"
-            className={`switch ${enabled ? "enabled" : ""}`}
+            className={`switch ${enabled ? "is-on" : ""}`}
             role="switch"
             aria-checked={enabled}
+            aria-label={label}
             onClick={() => onChange(!enabled)}
         >
-          <span className="switch-knob" />
+          <span className="switch__knob" />
         </button>
       </div>
   );
 }
 
+function TileHead({ id, label, children }) {
+  return (
+      <header className="tile-head">
+        <h2 id={id}>{label}</h2>
+        {children ? <span className="tile-head__meta">{children}</span> : null}
+      </header>
+  );
+}
+
 function OutlineEditor({ headings, setHeadings }) {
-  const [expanded, setExpanded] = useState(true);
-
-  const activeCount = headings.filter(
-      (heading) => heading.enabled,
-  ).length;
-
   const updateHeading = (headingId, changes) => {
     setHeadings((currentHeadings) =>
         currentHeadings.map((heading) =>
@@ -800,174 +1037,128 @@ function OutlineEditor({ headings, setHeadings }) {
     );
   };
 
-  const enableAll = () => {
+  const setAll = (enabled) => {
     setHeadings((currentHeadings) =>
         currentHeadings.map((heading) => ({
           ...heading,
-          enabled: true,
-        })),
-    );
-  };
-
-  const disableAll = () => {
-    setHeadings((currentHeadings) =>
-        currentHeadings.map((heading) => ({
-          ...heading,
-          enabled: false,
+          enabled,
         })),
     );
   };
 
   return (
-      <section className="card">
-        <div className="card-header">
+      <>
+        <div className="outline-toolbar">
           <button
               type="button"
-              className="outline-card-button"
-              onClick={() => setExpanded((current) => !current)}
+              className="text-link"
+              onClick={() => setAll(true)}
           >
-            <h2 className="card-title">
-              <ListTree size={18} />
-              Detected outline
-            </h2>
-
-            {expanded ? (
-                <ChevronDown size={18} />
-            ) : (
-                <ChevronRight size={18} />
-            )}
+            enable all
+          </button>
+          <button
+              type="button"
+              className="text-link"
+              onClick={() => setAll(false)}
+          >
+            disable all
           </button>
         </div>
 
-        {expanded && (
-            <div className="card-body">
-              <div className="outline-toolbar">
-            <span>
-              {activeCount} of {headings.length} bookmarks enabled
-            </span>
-
-                <span>
-              <button
-                  type="button"
-                  className="text-button"
-                  onClick={enableAll}
+        <ul className="outline-list">
+          {headings.map((heading) => (
+              <li
+                  key={heading.id}
+                  className={[
+                    "outline-row",
+                    `level-${heading.level}`,
+                    heading.enabled ? "" : "is-disabled",
+                  ]
+                      .filter(Boolean)
+                      .join(" ")}
               >
-                Enable all
-              </button>
+                <button
+                    type="button"
+                    className={`checkbox ${heading.enabled ? "is-checked" : ""}`}
+                    role="checkbox"
+                    aria-checked={heading.enabled}
+                    aria-label={
+                      heading.enabled
+                          ? "Disable bookmark"
+                          : "Enable bookmark"
+                    }
+                    onClick={() =>
+                        updateHeading(heading.id, {
+                          enabled: !heading.enabled,
+                        })
+                    }
+                >
+                  {heading.enabled ? <Check size={10} strokeWidth={3.5} /> : null}
+                </button>
 
-                  {" · "}
+                <input
+                    className="outline-input outline-input--code"
+                    aria-label="Bookmark section number"
+                    value={heading.code}
+                    placeholder="—"
+                    onChange={(event) =>
+                        updateHeading(heading.id, {
+                          code: event.target.value,
+                        })
+                    }
+                />
 
-                  <button
-                      type="button"
-                      className="text-button"
-                      onClick={disableAll}
-                  >
-                Disable all
-              </button>
-            </span>
-              </div>
+                <input
+                    className="outline-input outline-input--title"
+                    aria-label="Bookmark title"
+                    value={heading.title}
+                    onChange={(event) =>
+                        updateHeading(heading.id, {
+                          title: event.target.value,
+                        })
+                    }
+                />
 
-              {headings.length === 0 ? (
-                  <div className="outline-empty">
-                    No numbered headings were found. Use “Scan headings again”
-                    after opening a PDF, or keep the PDF’s existing outline.
-                  </div>
-              ) : (
-                  <div className="outline-list">
-                    {headings.map((heading) => (
-                        <div
-                            key={heading.id}
-                            className={[
-                              "outline-row",
-                              `level-${heading.level}`,
-                              heading.enabled ? "" : "disabled",
-                            ]
-                                .filter(Boolean)
-                                .join(" ")}
-                        >
-                          <button
-                              type="button"
-                              className="icon-button"
-                              title={
-                                heading.enabled
-                                    ? "Disable bookmark"
-                                    : "Enable bookmark"
-                              }
-                              onClick={() =>
-                                  updateHeading(heading.id, {
-                                    enabled: !heading.enabled,
-                                  })
-                              }
-                          >
-                            {heading.enabled ? (
-                                <Eye size={16} color="var(--accent-soft)" />
-                            ) : (
-                                <EyeOff size={16} />
-                            )}
-                          </button>
+                <select
+                    className="outline-input outline-input--level"
+                    aria-label="Bookmark level"
+                    value={heading.level}
+                    onChange={(event) =>
+                        updateHeading(heading.id, {
+                          level: Number(event.target.value),
+                        })
+                    }
+                >
+                  <option value="1">L1</option>
+                  <option value="2">L2</option>
+                  <option value="3">L3</option>
+                  <option value="4">L4</option>
+                  <option value="5">L5</option>
+                  <option value="6">L6</option>
+                </select>
 
-                          <input
-                              className="outline-small-input"
-                              aria-label="Bookmark section number"
-                              value={heading.code}
-                              onChange={(event) =>
-                                  updateHeading(heading.id, {
-                                    code: event.target.value,
-                                  })
-                              }
-                          />
-
-                          <input
-                              className="outline-title-input"
-                              aria-label="Bookmark title"
-                              value={heading.title}
-                              onChange={(event) =>
-                                  updateHeading(heading.id, {
-                                    title: event.target.value,
-                                  })
-                              }
-                          />
-
-                          <input
-                              className="outline-small-input"
-                              aria-label="Bookmark page"
-                              type="number"
-                              min="1"
-                              value={heading.page}
-                              onChange={(event) =>
-                                  updateHeading(heading.id, {
-                                    page: Math.max(
-                                        1,
-                                        Number(event.target.value) || 1,
-                                    ),
-                                  })
-                              }
-                          />
-
-                          <select
-                              className="outline-small-input outline-level-cell"
-                              aria-label="Bookmark level"
-                              value={heading.level}
-                              onChange={(event) =>
-                                  updateHeading(heading.id, {
-                                    level: Number(event.target.value),
-                                  })
-                              }
-                          >
-                            <option value="1">L1</option>
-                            <option value="2">L2</option>
-                            <option value="3">L3</option>
-                            <option value="4">L4</option>
-                            <option value="5">L5</option>
-                            <option value="6">L6</option>
-                          </select>
-                        </div>
-                    ))}
-                  </div>
-              )}
-            </div>
-        )}
-      </section>
+                <label className="outline-page">
+                  <span aria-hidden="true">p.</span>
+                  <input
+                      className="outline-input outline-input--page"
+                      aria-label="Bookmark page"
+                      type="number"
+                      min="1"
+                      value={heading.page}
+                      onChange={(event) =>
+                          updateHeading(heading.id, {
+                            page: Math.max(
+                                1,
+                                Number(event.target.value) || 1,
+                            ),
+                          })
+                      }
+                  />
+                </label>
+              </li>
+          ))}
+        </ul>
+      </>
   );
 }
 
@@ -989,6 +1180,13 @@ export default function App() {
 
   const [paperStyle, setPaperStyle] = useState("grid");
   const [paperSpacing, setPaperSpacing] = useState("5");
+  const [patternThickness, setPatternThickness] = useState("regular");
+  const [backgroundColor, setBackgroundColor] = useState(
+      DEFAULT_BACKGROUND_COLOR,
+  );
+  const [patternColor, setPatternColor] = useState(
+      LIGHT_PATTERN_PRESETS[0].hex,
+  );
   const [showBorder, setShowBorder] = useState(false);
 
   const [outlineMode, setOutlineMode] = useState("detect");
@@ -1012,6 +1210,22 @@ export default function App() {
     };
   }, [resultUrl]);
 
+  const darkBackground = isDarkColor(backgroundColor);
+
+  const activePatternPresets = darkBackground
+      ? DARK_PATTERN_PRESETS
+      : LIGHT_PATTERN_PRESETS;
+
+  const activeThickness = useMemo(
+      () =>
+          THICKNESS_OPTIONS.find(
+              (option) => option.value === patternThickness,
+          ) ?? THICKNESS_OPTIONS[1],
+      [patternThickness],
+  );
+
+  const borderColorHex = darkBackground ? "#8A94A0" : "#4D5966";
+
   const pageAspect = useMemo(
       () => ({
         width:
@@ -1030,32 +1244,57 @@ export default function App() {
   );
 
   const previewPattern = useMemo(() => {
+    const baseStyle = {
+      backgroundColor,
+    };
+
     if (paperStyle === "blank") {
-      return {};
+      return baseStyle;
     }
+
+    const previewSpacingPx =
+        paperSpacing === "2.5"
+            ? 10
+            : paperSpacing === "10"
+                ? 24
+                : 15;
+
+    const stroke = hexToRgba(
+        patternColor,
+        activeThickness.previewAlpha,
+    );
 
     if (paperStyle === "lines") {
       return {
-        backgroundImage:
-            "linear-gradient(var(--pdf-grid-line) 1px, transparent 1px)",
-        backgroundSize: "14px 14px",
+        ...baseStyle,
+        backgroundImage: `linear-gradient(${stroke} ${activeThickness.previewLinePx}px, transparent ${activeThickness.previewLinePx}px)`,
+        backgroundSize: `${previewSpacingPx}px ${previewSpacingPx}px`,
       };
     }
 
     if (paperStyle === "dots") {
+      const dotRadius = activeThickness.previewDotPx;
       return {
-        backgroundImage:
-            "radial-gradient(var(--pdf-dot-color) 1px, transparent 1px)",
-        backgroundSize: "14px 14px",
+        ...baseStyle,
+        backgroundImage: `radial-gradient(circle, ${stroke} ${dotRadius}px, transparent ${
+            dotRadius + 0.35
+        }px)`,
+        backgroundSize: `${previewSpacingPx}px ${previewSpacingPx}px`,
       };
     }
 
     return {
-      backgroundImage:
-          "linear-gradient(var(--pdf-grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--pdf-grid-line) 1px, transparent 1px)",
-      backgroundSize: "14px 14px",
+      ...baseStyle,
+      backgroundImage: `linear-gradient(${stroke} ${activeThickness.previewLinePx}px, transparent ${activeThickness.previewLinePx}px), linear-gradient(90deg, ${stroke} ${activeThickness.previewLinePx}px, transparent ${activeThickness.previewLinePx}px)`,
+      backgroundSize: `${previewSpacingPx}px ${previewSpacingPx}px`,
     };
-  }, [paperStyle]);
+  }, [
+    activeThickness,
+    backgroundColor,
+    paperSpacing,
+    paperStyle,
+    patternColor,
+  ]);
 
   const originalPagePosition = useMemo(() => {
     const totalHorizontal = 100 + leftMargin + rightMargin;
@@ -1067,10 +1306,11 @@ export default function App() {
       top: `${(topMargin / totalVertical) * 100}%`,
       bottom: `${(bottomMargin / totalVertical) * 100}%`,
       border: showBorder
-          ? "1px solid var(--pdf-border-color)"
+          ? `1px solid ${borderColorHex}`
           : "none",
     };
   }, [
+    borderColorHex,
     bottomMargin,
     leftMargin,
     rightMargin,
@@ -1085,6 +1325,61 @@ export default function App() {
 
     setResultUrl("");
     setResultName("");
+  };
+
+  const handleBackgroundColorChange = (nextColor) => {
+    const normalized = normalizeHex(nextColor);
+
+    if (!normalized) {
+      return;
+    }
+
+    const wasDark = isDarkColor(backgroundColor);
+    const willBeDark = isDarkColor(normalized);
+
+    setBackgroundColor(normalized);
+    clearResult();
+
+    if (wasDark !== willBeDark) {
+      const previousPalette = wasDark
+          ? DARK_PATTERN_PRESETS
+          : LIGHT_PATTERN_PRESETS;
+      const nextPalette = willBeDark
+          ? DARK_PATTERN_PRESETS
+          : LIGHT_PATTERN_PRESETS;
+
+      const matchedPreset = previousPalette.find(
+          (preset) =>
+              preset.hex.toUpperCase() === patternColor.toUpperCase(),
+      );
+
+      if (matchedPreset) {
+        const counterpart = nextPalette.find(
+            (preset) => preset.id === matchedPreset.id,
+        );
+        setPatternColor(
+            counterpart ? counterpart.hex : nextPalette[0].hex,
+        );
+      } else if (getContrastRatio(patternColor, normalized) < 1.6) {
+        setPatternColor(nextPalette[0].hex);
+      }
+    }
+  };
+
+  const handlePatternColorChange = (nextColor) => {
+    const normalized = normalizeHex(nextColor);
+
+    if (!normalized) {
+      return;
+    }
+
+    setPatternColor(normalized);
+    clearResult();
+  };
+
+  const handleThicknessChange = (nextThickness) => {
+    setPatternThickness(nextThickness);
+    clearResult();
   };
 
   const resetFile = () => {
@@ -1255,7 +1550,9 @@ export default function App() {
                                 marginTop,
                                 marginBottom,
                                 step,
-                                patternColor,
+                                patternPdfColor,
+                                lineThickness,
+                                dotRadius,
                               }) => {
     const originalLeft = marginLeft;
     const originalRight = marginLeft + originalWidth;
@@ -1263,9 +1560,9 @@ export default function App() {
     const originalTop = marginBottom + originalHeight;
 
     const lineOptions = {
-      thickness: 0.25,
-      color: patternColor,
-      opacity: 0.72,
+      thickness: lineThickness,
+      color: patternPdfColor,
+      opacity: 1,
     };
 
     const drawVerticalLine = (x) => {
@@ -1353,9 +1650,9 @@ export default function App() {
             page.drawCircle({
               x,
               y,
-              size: 0.65,
-              color: patternColor,
-              opacity: 0.82,
+              size: dotRadius,
+              color: patternPdfColor,
+              opacity: 1,
             });
           }
         }
@@ -1404,8 +1701,9 @@ export default function App() {
           Math.max(2, Number(paperSpacing)) *
           millimetresToPoints;
 
-      const patternColor = rgb(0.76, 0.82, 0.88);
-      const borderColor = rgb(0.3, 0.36, 0.43);
+      const backgroundPdfColor = hexToPdfRgb(backgroundColor);
+      const patternPdfColor = hexToPdfRgb(patternColor);
+      const borderPdfColor = hexToPdfRgb(borderColorHex);
       const white = rgb(1, 1, 1);
 
       for (
@@ -1448,14 +1746,14 @@ export default function App() {
         ]);
 
         /*
-         * Paint the complete background white.
+         * Paint the complete background with the selected paper color.
          */
         page.drawRectangle({
           x: 0,
           y: 0,
           width: newWidth,
           height: newHeight,
-          color: white,
+          color: backgroundPdfColor,
         });
 
         /*
@@ -1474,9 +1772,23 @@ export default function App() {
             marginTop,
             marginBottom,
             step: spacingInPoints,
-            patternColor,
+            patternPdfColor,
+            lineThickness: activeThickness.lineWidthPt,
+            dotRadius: activeThickness.dotRadiusPt,
           });
         }
+
+        /*
+         * Keep a white backing behind the original page so transparent PDFs
+         * remain legible when a darker writing-paper background is chosen.
+         */
+        page.drawRectangle({
+          x: marginLeft,
+          y: marginBottom,
+          width: originalWidth,
+          height: originalHeight,
+          color: white,
+        });
 
         /*
          * Place the complete original PDF page inside the new page.
@@ -1507,7 +1819,7 @@ export default function App() {
                 newHeight - outerInset * 2,
             ),
             borderWidth: 0.9,
-            borderColor,
+            borderColor: borderPdfColor,
           });
 
           page.drawRectangle({
@@ -1516,7 +1828,7 @@ export default function App() {
             width: originalWidth,
             height: originalHeight,
             borderWidth: 0.65,
-            borderColor,
+            borderColor: borderPdfColor,
           });
         }
 
@@ -1615,469 +1927,533 @@ export default function App() {
     }
   };
 
-  const statusClass =
-      statusType === "success"
-          ? "status-success"
-          : statusType === "error"
-              ? "status-error"
-              : "status-info";
+  const changeOutlineMode = async (nextMode) => {
+    if (nextMode === outlineMode) {
+      return;
+    }
+
+    setOutlineMode(nextMode);
+    clearResult();
+
+    if (!sourceBytes) {
+      return;
+    }
+
+    setBusy(true);
+    setProgress(0);
+
+    try {
+      if (nextMode === "detect") {
+        const detectedHeadings = await scanHeadings(
+            copyArrayBuffer(sourceBytes),
+        );
+
+        setStatus(
+            `Detected ${detectedHeadings.length} numbered headings.`,
+        );
+      } else {
+        setStage("Reading existing outline");
+        setStatus("Reading bookmarks from the source PDF…");
+
+        const existingOutline = await extractExistingOutline(
+            copyArrayBuffer(sourceBytes),
+        );
+
+        setHeadings(existingOutline);
+
+        setStatus(
+            existingOutline.length > 0
+                ? `Found ${existingOutline.length} existing outline entries.`
+                : "This PDF does not contain an existing outline.",
+        );
+
+        setStatusType("info");
+      }
+    } catch (error) {
+      console.error(error);
+
+      setStatus(
+          `Could not read the outline: ${
+              error?.message || "Unknown error"
+          }`,
+      );
+
+      setStatusType("error");
+    } finally {
+      setBusy(false);
+      setStage("");
+      setProgress(0);
+    }
+  };
+
+  const activeCount = headings.filter((heading) => heading.enabled).length;
+
+  const scaleLabel = `${(1 + (leftMargin + rightMargin) / 100).toFixed(2)} × ${(
+      1 +
+      (topMargin + bottomMargin) / 100
+  ).toFixed(2)}`;
+
+  const widestMargin = [
+    ["top", topMargin],
+    ["right", rightMargin],
+    ["bottom", bottomMargin],
+    ["left", leftMargin],
+  ].reduce((widest, entry) => (entry[1] > widest[1] ? entry : widest));
+
+  const previewHeading = headings.find((heading) => heading.enabled);
+
+  const steps = [
+    { id: "source", label: "source", done: Boolean(sourceFile) },
+    { id: "layout", label: "layout", done: Boolean(sourceFile) },
+    { id: "preview", label: "preview", done: Boolean(sourceFile) },
+    {
+      id: "outline",
+      label: "outline",
+      done: Boolean(sourceFile) && headings.length > 0,
+    },
+    { id: "export", label: "export", done: Boolean(resultUrl) },
+  ];
+
+  const currentStep = steps.find((step) => !step.done)?.id ?? "export";
+
+  const progressWidth = busy
+      ? clamp(progress, 0, 100)
+      : resultUrl
+          ? 100
+          : 0;
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    setDragging(false);
+    openPdf(event.dataTransfer.files?.[0]);
+  };
 
   return (
-      <>
-            <div className="app-shell">
-        <header className="app-header">
-          <div className="header-inner">
-            <div className="brand">
-              <div className="brand-icon">
-                <FileText size={23} />
-              </div>
+      <div className="app-shell">
+        <aside className="app-sidebar" aria-label="About this tool">
+          <div className="app-sidebar__top">
+            <h1 className="app-title">
+              Goodnotes
+              <br />
+              PDF Prep.
+            </h1>
 
-              <div>
-                <h1>Goodnotes PDF Prep</h1>
-                <p>
-                  Add margins, writing paper, borders and chapter
-                  outlines
-                </p>
-              </div>
-            </div>
+            <p className="app-lede">
+              Writing margins, grid paper and a chapter outline for any PDF.
+            </p>
 
-            <div className="local-badge">
-              <Lock size={14} />
-              <span>Files stay on this device</span>
-            </div>
-          </div>
-        </header>
-
-        <main className="app-main">
-          <div className="column left-column">
-            <section className="card">
-              <div className="card-header">
-                <h2 className="card-title">
-                  <Upload size={18} />
-                  Source PDF
-                </h2>
-              </div>
-
-              <div className="card-body">
-                {!sourceFile ? (
-                    <button
-                        type="button"
-                        className={`drop-zone ${
-                            dragging ? "dragging" : ""
-                        }`}
-                        onClick={() =>
-                            fileInputRef.current?.click()
-                        }
-                        onDragEnter={(event) => {
-                          event.preventDefault();
-                          setDragging(true);
-                        }}
-                        onDragOver={(event) => {
-                          event.preventDefault();
-                          setDragging(true);
-                        }}
-                        onDragLeave={(event) => {
-                          event.preventDefault();
-                          setDragging(false);
-                        }}
-                        onDrop={(event) => {
-                          event.preventDefault();
-                          setDragging(false);
-
-                          const droppedFile =
-                              event.dataTransfer.files?.[0];
-
-                          openPdf(droppedFile);
-                        }}
-                    >
-                      <div>
-                        <div className="drop-icon">
-                          <Upload size={25} />
-                        </div>
-
-                        <strong>Drop a PDF here</strong>
-                        <span>or click to browse</span>
-                      </div>
-                    </button>
-                ) : (
-                    <div className="file-box">
-                      <FileText
-                          size={21}
-                          color="var(--accent-soft)"
-                      />
-
-                      <div className="file-main">
-                        <p className="file-name">
-                          {sourceFile.name}
-                        </p>
-
-                        <p className="file-meta">
-                          {formatFileSize(sourceFile.size)}
-                          {pageCount
-                              ? ` · ${pageCount} pages`
-                              : ""}
-                        </p>
-                      </div>
-
-                      <button
-                          type="button"
-                          className="icon-button"
-                          aria-label="Remove PDF"
-                          title="Remove PDF"
-                          disabled={busy}
-                          onClick={resetFile}
-                      >
-                        <Trash2 size={17} />
-                      </button>
-                    </div>
-                )}
-
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    hidden
-                    onChange={(event) => {
-                      const selectedFile =
-                          event.target.files?.[0];
-
-                      openPdf(selectedFile);
-                    }}
-                />
-              </div>
-            </section>
-
-            <section className="card">
-              <div className="card-header">
-                <h2 className="card-title">
-                  <Settings2 size={18} />
-                  Layout
-                </h2>
-              </div>
-
-              <div className="card-body">
-                <div className="settings-grid">
-                  <NumberSetting
-                      label="Right margin"
-                      value={rightMargin}
-                      onChange={setRightMargin}
-                  />
-
-                  <NumberSetting
-                      label="Left margin"
-                      value={leftMargin}
-                      onChange={setLeftMargin}
-                  />
-
-                  <NumberSetting
-                      label="Top margin"
-                      value={topMargin}
-                      onChange={setTopMargin}
-                  />
-
-                  <NumberSetting
-                      label="Bottom margin"
-                      value={bottomMargin}
-                      onChange={setBottomMargin}
-                  />
-                </div>
-
-                <div className="settings-section">
-                  <div className="settings-grid">
-                    <div className="field">
-                      <label>Paper style</label>
-
-                      <select
-                          value={paperStyle}
-                          onChange={(event) =>
-                              setPaperStyle(event.target.value)
-                          }
-                      >
-                        <option value="grid">Grid</option>
-                        <option value="lines">
-                          Ruled lines
-                        </option>
-                        <option value="dots">Dots</option>
-                        <option value="blank">Blank</option>
-                      </select>
-                    </div>
-
-                    <div className="field">
-                      <label>Spacing</label>
-
-                      <select
-                          value={paperSpacing}
-                          disabled={paperStyle === "blank"}
-                          onChange={(event) =>
-                              setPaperSpacing(
-                                  event.target.value,
-                              )
-                          }
-                      >
-                        <option value="2.5">2.5 mm</option>
-                        <option value="5">5 mm</option>
-                        <option value="10">10 mm</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <Toggle
-                      enabled={showBorder}
-                      onChange={setShowBorder}
-                      label="Full page border"
-                      description="Includes a divider around the original page"
-                  />
-
-                  <div className="field">
-                    <label>Outline handling</label>
-
-                    <select
-                        value={outlineMode}
-                        disabled={busy}
-                        onChange={async (event) => {
-                          const nextMode = event.target.value;
-
-                          setOutlineMode(nextMode);
-                          clearResult();
-
-                          if (!sourceBytes) {
-                            return;
-                          }
-
-                          setBusy(true);
-                          setProgress(0);
-
-                          try {
-                            if (nextMode === "detect") {
-                              const detectedHeadings =
-                                  await scanHeadings(
-                                      copyArrayBuffer(sourceBytes),
-                                  );
-
-                              setStatus(
-                                  `Detected ${detectedHeadings.length} numbered headings.`,
-                              );
-                            } else {
-                              setStage("Reading existing outline");
-                              setStatus(
-                                  "Reading bookmarks from the source PDF…",
-                              );
-
-                              const existingOutline =
-                                  await extractExistingOutline(
-                                      copyArrayBuffer(sourceBytes),
-                                  );
-
-                              setHeadings(existingOutline);
-
-                              setStatus(
-                                  existingOutline.length > 0
-                                      ? `Found ${existingOutline.length} existing outline entries.`
-                                      : "This PDF does not contain an existing outline.",
-                              );
-
-                              setStatusType("info");
-                            }
-                          } catch (error) {
-                            console.error(error);
-
-                            setStatus(
-                                `Could not read the outline: ${
-                                    error?.message || "Unknown error"
-                                }`,
-                            );
-
-                            setStatusType("error");
-                          } finally {
-                            setBusy(false);
-                            setStage("");
-                            setProgress(0);
-                          }
-                        }}
-                    >
-                      <option value="detect">
-                        Detect and replace outline
-                      </option>
-
-                      <option value="keep">
-                        Keep existing outline
-                      </option>
-                    </select>
-                  </div>
-
-                  {sourceBytes &&
-                      outlineMode === "detect" && (
-                          <button
-                              type="button"
-                              className="button button-secondary button-full"
-                              disabled={busy}
-                              onClick={rescanHeadings}
-                          >
-                            <RotateCcw size={15} />
-                            Scan headings again
-                          </button>
-                      )}
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <div className="column right-column">
-            <section className="card">
-              <div className="card-header">
-                <h2 className="card-title">
-                  <Grid3X3 size={18} />
-                  Layout preview
-                </h2>
-              </div>
-
-              <div className="preview-area">
-                <div
-                    className="preview-page"
-                    style={{
-                      aspectRatio: `${pageAspect.width} / ${pageAspect.height}`,
-                      ...previewPattern,
-                    }}
-                >
-                  <div
-                      className="original-page"
-                      style={originalPagePosition}
+            <ol className="app-steps" aria-label="Progress">
+              {steps.map((step, index) => (
+                  <li
+                      key={step.id}
+                      className={[
+                        step.done ? "is-done" : "",
+                        currentStep === step.id ? "is-current" : "",
+                      ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      aria-current={currentStep === step.id ? "step" : undefined}
                   >
-                    <div className="original-page-inner">
-                      <BookOpen
-                          size={43}
-                          color="var(--pdf-page-book-icon)"
-                      />
-
-                      <strong>Original PDF page</strong>
-
-                      <span>
-                        Original text and graphics remain
-                        vector-based
+                    <a href={`#tile-${step.id}`}>
+                      <span className="app-steps__marker" aria-hidden="true">
+                        {currentStep === step.id ? "→" : step.done ? "✓" : ""}
                       </span>
-                    </div>
+                      {String(index + 1).padStart(2, "0")} {step.label}
+                    </a>
+                  </li>
+              ))}
+            </ol>
+          </div>
+
+          <div className="app-sidebar__bottom">
+            <a
+                className="text-link"
+                href="https://xandervanhaeren.github.io/"
+            >
+              ← Xander Vanhaeren
+            </a>
+
+            <a
+                className="text-link"
+                href="https://github.com/XanderVanhaeren/goodnotes-pdf-prep"
+                target="_blank"
+                rel="noopener noreferrer"
+            >
+              Source on GitHub
+            </a>
+
+            <p className="app-privacy">
+              Runs in your browser.
+              <br />
+              Files never leave this device.
+            </p>
+          </div>
+        </aside>
+
+        <main className="app-grid">
+          {/* 01 / source ------------------------------------------------ */}
+          <section
+              id="tile-source"
+              className="tile tile--source"
+              aria-labelledby="tile-source-title"
+          >
+            <TileHead id="tile-source-title" label="01 / source">
+              {sourceFile ? "loaded" : "drop or browse"}
+            </TileHead>
+
+            {!sourceFile ? (
+                <button
+                    type="button"
+                    className={`drop-zone ${dragging ? "is-dragging" : ""}`}
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragEnter={(event) => {
+                      event.preventDefault();
+                      setDragging(true);
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      setDragging(true);
+                    }}
+                    onDragLeave={(event) => {
+                      event.preventDefault();
+                      setDragging(false);
+                    }}
+                    onDrop={handleDrop}
+                >
+                  <Upload size={18} strokeWidth={1.75} />
+                  <span>
+                    <strong>Drop a PDF here</strong>
+                    <small>or click to browse</small>
+                  </span>
+                </button>
+            ) : (
+                <div className="file-box">
+                  <div className="file-box__icon" aria-hidden="true">
+                    PDF
                   </div>
 
-                  {showBorder && (
-                      <div className="preview-outer-border" />
-                  )}
-                </div>
-              </div>
-            </section>
+                  <div className="file-box__main">
+                    <p className="file-box__name" title={sourceFile.name}>
+                      {sourceFile.name}
+                    </p>
 
-            {sourceFile && headings.length > 0 && (
+                    <p className="file-box__meta">
+                      {formatFileSize(sourceFile.size)}
+                      {pageCount ? ` · ${pageCount} pages` : ""}
+                    </p>
+                  </div>
+
+                  <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Remove PDF"
+                      title="Remove PDF"
+                      disabled={busy}
+                      onClick={resetFile}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+            )}
+
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                hidden
+                onChange={(event) => openPdf(event.target.files?.[0])}
+            />
+          </section>
+
+          {/* 02 / layout ------------------------------------------------ */}
+          <section
+              id="tile-layout"
+              className="tile tile--layout"
+              aria-labelledby="tile-layout-title"
+          >
+            <TileHead id="tile-layout-title" label="02 / layout">
+              % of page
+            </TileHead>
+
+            <div className="margin-grid">
+              <MarginField
+                  label="top"
+                  value={topMargin}
+                  onChange={setTopMargin}
+              />
+              <MarginField
+                  label="right"
+                  value={rightMargin}
+                  onChange={setRightMargin}
+              />
+              <MarginField
+                  label="bottom"
+                  value={bottomMargin}
+                  onChange={setBottomMargin}
+              />
+              <MarginField
+                  label="left"
+                  value={leftMargin}
+                  onChange={setLeftMargin}
+              />
+            </div>
+
+            <Segmented
+                label="paper"
+                value={paperStyle}
+                onChange={setPaperStyle}
+                options={[
+                  { value: "grid", label: "grid" },
+                  { value: "lines", label: "lines" },
+                  { value: "dots", label: "dots" },
+                  { value: "blank", label: "blank" },
+                ]}
+            />
+
+            <Segmented
+                label="spacing"
+                value={paperSpacing}
+                onChange={setPaperSpacing}
+                disabled={paperStyle === "blank"}
+                options={[
+                  { value: "2.5", label: "2.5mm" },
+                  { value: "5", label: "5mm" },
+                  { value: "10", label: "10mm" },
+                ]}
+            />
+
+            <Segmented
+                label="weight"
+                value={patternThickness}
+                onChange={handleThicknessChange}
+                disabled={paperStyle === "blank"}
+                options={THICKNESS_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+            />
+
+            <ColorSelector
+                label="page bg"
+                presets={BACKGROUND_PRESETS}
+                value={backgroundColor}
+                onChange={handleBackgroundColorChange}
+                customLabel="Custom background color"
+            />
+
+            <ColorSelector
+                label={paperStyle === "blank" ? "pattern" : paperStyle}
+                hint={darkBackground ? "dark bg" : "light bg"}
+                presets={activePatternPresets}
+                value={patternColor}
+                onChange={handlePatternColorChange}
+                disabled={paperStyle === "blank"}
+                customLabel={`Custom ${paperStyle === "blank" ? "pattern" : paperStyle} color`}
+            />
+
+            <Toggle
+                enabled={showBorder}
+                onChange={setShowBorder}
+                label="page border"
+                description="frame around the page and the original"
+            />
+          </section>
+
+          {/* 03 / preview ----------------------------------------------- */}
+          <section
+              id="tile-preview"
+              className="tile tile--preview"
+              aria-labelledby="tile-preview-title"
+          >
+            <TileHead id="tile-preview-title" label="03 / preview">
+              page → {scaleLabel}
+            </TileHead>
+
+            <div className="preview-stage">
+              <div
+                  className={`preview-page ${darkBackground ? "is-dark" : ""}`}
+                  style={{
+                    "--page-ratio": pageAspect.width / pageAspect.height,
+                    ...previewPattern,
+                  }}
+              >
+                <div
+                    className="original-page"
+                    style={originalPagePosition}
+                >
+                  <div className="original-page__inner">
+                    <p className="original-page__title">
+                      {previewHeading
+                          ? `${previewHeading.code ? `${previewHeading.code} ` : ""}${previewHeading.title}`
+                          : "Original PDF page"}
+                    </p>
+                    <i style={{ width: "92%" }} />
+                    <i style={{ width: "84%" }} />
+                    <i style={{ width: "88%" }} />
+                    <i style={{ width: "58%" }} />
+                    <span className="original-page__figure" />
+                    <i style={{ width: "78%" }} />
+                    <i style={{ width: "66%" }} />
+                  </div>
+                </div>
+
+                {showBorder && (
+                    <div
+                        className="preview-outer-border"
+                        style={{ borderColor: borderColorHex }}
+                    />
+                )}
+              </div>
+            </div>
+
+            <div className="tile-foot">
+              <span>original stays vector</span>
+              <span>
+                writing space: {widestMargin[0]} {widestMargin[1]}%
+              </span>
+            </div>
+          </section>
+
+          {/* 04 / outline ----------------------------------------------- */}
+          <section
+              id="tile-outline"
+              className="tile tile--outline"
+              aria-labelledby="tile-outline-title"
+          >
+            <TileHead id="tile-outline-title" label="04 / outline">
+              {headings.length > 0 ? (
+                  <>
+                    <b>{activeCount}</b> / {headings.length} enabled
+                  </>
+              ) : (
+                  "bookmarks"
+              )}
+            </TileHead>
+
+            <div className="outline-controls">
+              <Segmented
+                  label="mode"
+                  value={outlineMode}
+                  onChange={changeOutlineMode}
+                  disabled={busy}
+                  options={[
+                    { value: "detect", label: "detect" },
+                    { value: "keep", label: "keep existing" },
+                  ]}
+              />
+
+              {sourceBytes && outlineMode === "detect" && (
+                  <button
+                      type="button"
+                      className="button button--ghost button--small"
+                      disabled={busy}
+                      onClick={rescanHeadings}
+                  >
+                    <RotateCcw size={13} />
+                    rescan
+                  </button>
+              )}
+            </div>
+
+            {sourceFile && headings.length > 0 ? (
                 <OutlineEditor
                     headings={headings}
                     setHeadings={setHeadings}
                 />
+            ) : (
+                <p className="empty-state">
+                  {sourceFile
+                      ? outlineMode === "detect"
+                          ? "No numbered headings found. Try rescanning, or keep the PDF’s existing outline."
+                          : "This PDF has no existing outline. Switch to detect headings."
+                      : "Open a PDF to detect titles like 1.1, 2.3, 4.4.2 and Hoofdstuk 6."}
+                </p>
             )}
+          </section>
 
-            <section className="card">
-              <div className="status-card">
-                {busy && (
-                    <>
-                      <div className="progress-header">
-                        <span>{stage || "Working"}</span>
-                        <span>{progress}%</span>
-                      </div>
+          {/* 05 / export ------------------------------------------------ */}
+          <section
+              id="tile-export"
+              className="tile tile--export"
+              aria-labelledby="tile-export-title"
+          >
+            <TileHead id="tile-export-title" label="05 / export">
+              {busy ? `${progress}%` : resultUrl ? "100%" : "idle"}
+            </TileHead>
 
-                      <div className="progress-track">
-                        <div
-                            className="progress-fill"
-                            style={{
-                              width: `${clamp(
-                                  progress,
-                                  0,
-                                  100,
-                              )}%`,
-                            }}
-                        />
-                      </div>
-
-                      <p className="progress-message">
-                        {status}
-                      </p>
-                    </>
-                )}
-
-                {!busy && status && (
-                    <div
-                        className={`status-box ${statusClass}`}
-                    >
-                      {statusType === "success" ? (
-                          <Check
-                              size={18}
-                              style={{ flex: "0 0 auto" }}
-                          />
-                      ) : statusType === "error" ? (
-                          <AlertTriangle
-                              size={18}
-                              style={{ flex: "0 0 auto" }}
-                          />
-                      ) : (
-                          <FileText
-                              size={18}
-                              style={{ flex: "0 0 auto" }}
-                          />
-                      )}
-
-                      <span>{status}</span>
-                    </div>
-                )}
-
+            <div className="export-status">
+              <div
+                  className="progress-track"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={progressWidth}
+              >
                 <div
-                    className={`actions ${
-                        resultUrl ? "" : "one"
-                    }`}
-                >
-                  <button
-                      type="button"
-                      className="button button-primary"
-                      disabled={
-                          !sourceBytes ||
-                          !pageCount ||
-                          busy
-                      }
-                      onClick={createGoodnotesPdf}
-                  >
-                    {busy ? (
-                        <>
-                          <LoaderCircle
-                              size={17}
-                              className="spinning-icon"
-                          />
-                          Working…
-                        </>
-                    ) : (
-                        <>
-                          <FileText size={17} />
-                          Create Goodnotes PDF
-                        </>
-                    )}
-                  </button>
-
-                  {resultUrl && (
-                      <a
-                          className="button button-secondary"
-                          href={resultUrl}
-                          download={resultName}
-                      >
-                        <Download size={17} />
-                        Download PDF
-                      </a>
-                  )}
+                    className="progress-fill"
+                    style={{ width: `${progressWidth}%` }}
+                />
               </div>
 
-              <p className="footnote">
-                A 400–500 page PDF can require several minutes
-                and substantial memory. Keep this browser tab open
-                until the download button appears.
+              <p
+                  className={`status-line status-line--${busy ? "info" : statusType}`}
+                  aria-live="polite"
+              >
+                {busy ? (
+                    <>
+                      <b>{(stage || "working").toLowerCase()}</b>
+                      {status ? ` — ${status}` : ""}
+                    </>
+                ) : status ? (
+                    <>
+                      {statusType === "success" ? (
+                          <Check size={13} strokeWidth={2.5} />
+                      ) : statusType === "error" ? (
+                          <AlertTriangle size={13} />
+                      ) : null}
+                      <span>{status}</span>
+                    </>
+                ) : (
+                    <span>Waiting for a PDF.</span>
+                )}
               </p>
-          </div>
-        </section>
+            </div>
+
+            <div className="export-actions">
+              <button
+                  type="button"
+                  className="button button--primary"
+                  disabled={!sourceBytes || !pageCount || busy}
+                  onClick={createGoodnotesPdf}
+              >
+                {busy ? (
+                    <>
+                      <LoaderCircle size={15} className="spinning-icon" />
+                      Working…
+                    </>
+                ) : (
+                    "Create Goodnotes PDF"
+                )}
+              </button>
+
+              {resultUrl && (
+                  <a
+                      className="button button--ghost"
+                      href={resultUrl}
+                      download={resultName}
+                  >
+                    Download
+                    <Download size={15} />
+                  </a>
+              )}
+            </div>
+
+            <p className="footnote">
+              Large PDFs (400+ pages) can take a few minutes and a lot of
+              memory. Keep this tab open until the download appears.
+            </p>
+          </section>
+        </main>
       </div>
-      </main>
-</div>
-</>
-);
+  );
 }
