@@ -13,6 +13,7 @@ import {
   ListTree,
   LoaderCircle,
   Lock,
+  Pipette,
   RotateCcw,
   Settings2,
   Trash2,
@@ -74,6 +75,58 @@ const formatFileSize = (bytes) => {
 };
 
 const copyArrayBuffer = (arrayBuffer) => arrayBuffer.slice(0);
+
+const PATTERN_COLOR_PRESETS = [
+  { id: "greyish-blue", name: "Greyish blue", hex: "#9eb3c7" },
+  { id: "dark-gray", name: "Dark gray", hex: "#262626" },
+  { id: "medium-gray", name: "Medium gray", hex: "#7a828a" },
+  { id: "light-gray", name: "Light gray", hex: "#cbd2d9" },
+  { id: "graph-green", name: "Graph green", hex: "#7ea896" },
+  { id: "warm-sepia", name: "Warm sepia", hex: "#b59e84" },
+  { id: "soft-rose", name: "Soft rose", hex: "#cf9898" },
+];
+
+const PATTERN_THICKNESS_PRESETS = [
+  { label: "Fine", value: 0.2 },
+  { label: "Normal", value: 0.35 },
+  { label: "Medium", value: 0.6 },
+  { label: "Bold", value: 1.0 },
+];
+
+const hexToPdfRgb = (hex) => {
+  const cleaned = String(hex || "").replace(/^#/, "").trim();
+  const fullHex =
+      cleaned.length === 3
+          ? cleaned
+              .split("")
+              .map((char) => `${char}${char}`)
+              .join("")
+          : cleaned;
+
+  if (!/^[0-9a-f]{6}$/i.test(fullHex)) {
+    return rgb(158 / 255, 179 / 255, 199 / 255);
+  }
+
+  const r = Number.parseInt(fullHex.slice(0, 2), 16) / 255;
+  const g = Number.parseInt(fullHex.slice(2, 4), 16) / 255;
+  const b = Number.parseInt(fullHex.slice(4, 6), 16) / 255;
+
+  return rgb(r, g, b);
+};
+
+const isColorLight = (hex) => {
+  const cleaned = String(hex || "").replace(/^#/, "").trim();
+
+  if (!/^[0-9a-f]{6}$/i.test(cleaned)) {
+    return true;
+  }
+
+  const r = Number.parseInt(cleaned.slice(0, 2), 16);
+  const g = Number.parseInt(cleaned.slice(2, 4), 16);
+  const b = Number.parseInt(cleaned.slice(4, 6), 16);
+
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62;
+};
 
 /* -------------------------------------------------------------------------- */
 /*                           Heading detection logic                           */
@@ -989,6 +1042,10 @@ export default function App() {
 
   const [paperStyle, setPaperStyle] = useState("grid");
   const [paperSpacing, setPaperSpacing] = useState("5");
+  const [patternColor, setPatternColor] = useState(
+      PATTERN_COLOR_PRESETS[0].hex,
+  );
+  const [patternThickness, setPatternThickness] = useState(0.35);
   const [showBorder, setShowBorder] = useState(false);
 
   const [outlineMode, setOutlineMode] = useState("detect");
@@ -1034,28 +1091,39 @@ export default function App() {
       return {};
     }
 
+    const previewSpacingPx =
+        paperSpacing === "2.5"
+            ? 10
+            : paperSpacing === "10"
+                ? 22
+                : 14;
+    const backgroundSize = `${previewSpacingPx}px ${previewSpacingPx}px`;
+    const linePx = Number(
+        (0.6 + patternThickness * 1.6).toFixed(2),
+    );
+    const dotPx = Number(
+        (0.75 + patternThickness * 1.5).toFixed(2),
+    );
+
     if (paperStyle === "lines") {
       return {
-        backgroundImage:
-            "linear-gradient(var(--pdf-grid-line) 1px, transparent 1px)",
-        backgroundSize: "14px 14px",
+        backgroundImage: `linear-gradient(${patternColor} ${linePx}px, transparent ${linePx}px)`,
+        backgroundSize,
       };
     }
 
     if (paperStyle === "dots") {
       return {
-        backgroundImage:
-            "radial-gradient(var(--pdf-dot-color) 1px, transparent 1px)",
-        backgroundSize: "14px 14px",
+        backgroundImage: `radial-gradient(${patternColor} ${dotPx}px, transparent ${Number((dotPx + 0.4).toFixed(2))}px)`,
+        backgroundSize,
       };
     }
 
     return {
-      backgroundImage:
-          "linear-gradient(var(--pdf-grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--pdf-grid-line) 1px, transparent 1px)",
-      backgroundSize: "14px 14px",
+      backgroundImage: `linear-gradient(${patternColor} ${linePx}px, transparent ${linePx}px), linear-gradient(90deg, ${patternColor} ${linePx}px, transparent ${linePx}px)`,
+      backgroundSize,
     };
-  }, [paperStyle]);
+  }, [paperSpacing, paperStyle, patternColor, patternThickness]);
 
   const originalPagePosition = useMemo(() => {
     const totalHorizontal = 100 + leftMargin + rightMargin;
@@ -1255,7 +1323,8 @@ export default function App() {
                                 marginTop,
                                 marginBottom,
                                 step,
-                                patternColor,
+                                patternRgb,
+                                thickness,
                               }) => {
     const originalLeft = marginLeft;
     const originalRight = marginLeft + originalWidth;
@@ -1263,10 +1332,12 @@ export default function App() {
     const originalTop = marginBottom + originalHeight;
 
     const lineOptions = {
-      thickness: 0.25,
-      color: patternColor,
-      opacity: 0.72,
+      thickness,
+      color: patternRgb,
+      opacity: 1,
     };
+
+    const dotRadius = Math.max(0.35, 0.3 + thickness * 1.25);
 
     const drawVerticalLine = (x) => {
       if (x < originalLeft || x > originalRight) {
@@ -1353,9 +1424,9 @@ export default function App() {
             page.drawCircle({
               x,
               y,
-              size: 0.65,
-              color: patternColor,
-              opacity: 0.82,
+              size: dotRadius,
+              color: patternRgb,
+              opacity: 1,
             });
           }
         }
@@ -1404,7 +1475,7 @@ export default function App() {
           Math.max(2, Number(paperSpacing)) *
           millimetresToPoints;
 
-      const patternColor = rgb(0.76, 0.82, 0.88);
+      const patternRgb = hexToPdfRgb(patternColor);
       const borderColor = rgb(0.3, 0.36, 0.43);
       const white = rgb(1, 1, 1);
 
@@ -1474,7 +1545,8 @@ export default function App() {
             marginTop,
             marginBottom,
             step: spacingInPoints,
-            patternColor,
+            patternRgb,
+            thickness: patternThickness,
           });
         }
 
@@ -1621,6 +1693,24 @@ export default function App() {
           : statusType === "error"
               ? "status-error"
               : "status-info";
+
+  const patternControlsDisabled = paperStyle === "blank";
+  const activeColorPreset = PATTERN_COLOR_PRESETS.find(
+      (preset) =>
+          preset.hex.toLowerCase() === patternColor.toLowerCase(),
+  );
+  const isCustomColor = !activeColorPreset;
+  const patternColorLabel = activeColorPreset
+      ? activeColorPreset.name
+      : patternColor.toUpperCase();
+  const patternElementLabel =
+      paperStyle === "dots"
+          ? "Dot"
+          : paperStyle === "lines"
+              ? "Line"
+              : paperStyle === "grid"
+                  ? "Grid"
+                  : "Pattern";
 
   return (
       <>
@@ -1807,7 +1897,7 @@ export default function App() {
 
                       <select
                           value={paperSpacing}
-                          disabled={paperStyle === "blank"}
+                          disabled={patternControlsDisabled}
                           onChange={(event) =>
                               setPaperSpacing(
                                   event.target.value,
@@ -1819,6 +1909,167 @@ export default function App() {
                         <option value="10">10 mm</option>
                       </select>
                     </div>
+                  </div>
+
+                  <div
+                      className={`field ${
+                          patternControlsDisabled
+                              ? "field-disabled"
+                              : ""
+                      }`}
+                  >
+                    <div className="field-label-row">
+                      <label>{patternElementLabel} color</label>
+                      <span className="field-value-hint">
+                        {patternColorLabel}
+                      </span>
+                    </div>
+
+                    <div
+                        className="color-swatches"
+                        role="group"
+                        aria-label="Pattern color presets"
+                    >
+                      {PATTERN_COLOR_PRESETS.map((preset) => {
+                        const isSelected =
+                            preset.hex.toLowerCase() ===
+                            patternColor.toLowerCase();
+
+                        return (
+                            <button
+                                key={preset.id}
+                                type="button"
+                                className={`color-swatch ${
+                                    isSelected ? "active" : ""
+                                }`}
+                                style={{
+                                  backgroundColor: preset.hex,
+                                }}
+                                disabled={patternControlsDisabled}
+                                title={preset.name}
+                                aria-label={preset.name}
+                                aria-pressed={isSelected}
+                                onClick={() =>
+                                    setPatternColor(preset.hex)
+                                }
+                            >
+                              {isSelected && (
+                                  <Check
+                                      size={13}
+                                      strokeWidth={3}
+                                      color={
+                                        isColorLight(preset.hex)
+                                            ? "#1b1b1b"
+                                            : "#f5f5f5"
+                                      }
+                                  />
+                              )}
+                            </button>
+                        );
+                      })}
+
+                      <label
+                          className={`color-swatch color-swatch-custom ${
+                              isCustomColor ? "active" : ""
+                          } ${
+                              patternControlsDisabled
+                                  ? "disabled"
+                                  : ""
+                          }`}
+                          style={
+                            isCustomColor
+                                ? { backgroundColor: patternColor }
+                                : undefined
+                          }
+                          title="Custom color"
+                      >
+                        <input
+                            type="color"
+                            className="color-input-native"
+                            aria-label="Custom pattern color"
+                            disabled={patternControlsDisabled}
+                            value={patternColor}
+                            onChange={(event) =>
+                                setPatternColor(event.target.value)
+                            }
+                        />
+                        <Pipette
+                            size={13}
+                            color={
+                              isCustomColor
+                                  ? isColorLight(patternColor)
+                                      ? "#1b1b1b"
+                                      : "#f5f5f5"
+                                  : "var(--input-text)"
+                            }
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div
+                      className={`field ${
+                          patternControlsDisabled
+                              ? "field-disabled"
+                              : ""
+                      }`}
+                  >
+                    <div className="field-label-row">
+                      <label htmlFor="pattern-thickness-range">
+                        {patternElementLabel} thickness
+                      </label>
+                      <span className="field-value-hint">
+                        {patternThickness.toFixed(2)} pt
+                      </span>
+                    </div>
+
+                    <div
+                        className="thickness-presets"
+                        role="group"
+                        aria-label="Pattern thickness presets"
+                    >
+                      {PATTERN_THICKNESS_PRESETS.map((preset) => {
+                        const isSelected =
+                            Math.abs(
+                                patternThickness - preset.value,
+                            ) < 0.001;
+
+                        return (
+                            <button
+                                key={preset.label}
+                                type="button"
+                                className={`thickness-pill ${
+                                    isSelected ? "active" : ""
+                                }`}
+                                disabled={patternControlsDisabled}
+                                aria-pressed={isSelected}
+                                onClick={() =>
+                                    setPatternThickness(
+                                        preset.value,
+                                    )
+                                }
+                            >
+                              {preset.label}
+                            </button>
+                        );
+                      })}
+                    </div>
+
+                    <input
+                        id="pattern-thickness-range"
+                        type="range"
+                        className="thickness-slider"
+                        min="0.15"
+                        max="1.5"
+                        step="0.05"
+                        disabled={patternControlsDisabled}
+                        value={patternThickness}
+                        onChange={(event) =>
+                            setPatternThickness(
+                                clamp(event.target.value, 0.15, 1.5),
+                            )
+                        }
+                    />
                   </div>
 
                   <Toggle
