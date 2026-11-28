@@ -66,6 +66,147 @@ const formatFileSize = (bytes) => {
 const copyArrayBuffer = (arrayBuffer) => arrayBuffer.slice(0);
 
 /* -------------------------------------------------------------------------- */
+/*                       Paper color & thickness presets                      */
+/* -------------------------------------------------------------------------- */
+
+const DEFAULT_BACKGROUND_COLOR = "#F1F1F1";
+
+const BACKGROUND_PRESETS = [
+  { id: "soft-white", label: "Soft white", hex: "#F1F1F1" },
+  { id: "white", label: "Pure white", hex: "#FFFFFF" },
+  { id: "warm-paper", label: "Warm paper", hex: "#F5F1E6" },
+  { id: "grey", label: "Cool grey", hex: "#DCDFE4" },
+  { id: "dark-grey", label: "Dark grey", hex: "#26272B" },
+  { id: "charcoal", label: "Charcoal", hex: "#16171A" },
+];
+
+const LIGHT_PATTERN_PRESETS = [
+  { id: "slate-blue", label: "Greyish blue", hex: "#7E94AB" },
+  { id: "dark-gray", label: "Dark gray", hex: "#222428" },
+  { id: "soft-purple", label: "Soft purple", hex: "#9485B8" },
+  { id: "subtle-gray", label: "Subtle gray", hex: "#A4AAB3" },
+  { id: "sage", label: "Muted sage", hex: "#7E9B8C" },
+  { id: "warm-taupe", label: "Warm taupe", hex: "#AD9A86" },
+];
+
+const DARK_PATTERN_PRESETS = [
+  { id: "slate-blue", label: "Greyish blue", hex: "#6E87A1" },
+  { id: "dark-gray", label: "Off-white", hex: "#D4D7DD" },
+  { id: "soft-purple", label: "Soft purple", hex: "#9D8DC4" },
+  { id: "subtle-gray", label: "Subtle gray", hex: "#545963" },
+  { id: "sage", label: "Muted sage", hex: "#719684" },
+  { id: "warm-taupe", label: "Warm sand", hex: "#A89680" },
+];
+
+const THICKNESS_OPTIONS = [
+  {
+    value: "thin",
+    label: "thin",
+    lineWidthPt: 0.25,
+    dotRadiusPt: 0.6,
+    previewLinePx: 1,
+    previewAlpha: 0.72,
+    previewDotPx: 1,
+  },
+  {
+    value: "regular",
+    label: "regular",
+    lineWidthPt: 0.45,
+    dotRadiusPt: 0.9,
+    previewLinePx: 1.25,
+    previewAlpha: 0.94,
+    previewDotPx: 1.4,
+  },
+  {
+    value: "medium",
+    label: "medium",
+    lineWidthPt: 0.8,
+    dotRadiusPt: 1.3,
+    previewLinePx: 1.75,
+    previewAlpha: 1,
+    previewDotPx: 1.9,
+  },
+  {
+    value: "thick",
+    label: "thick",
+    lineWidthPt: 1.25,
+    dotRadiusPt: 1.8,
+    previewLinePx: 2.5,
+    previewAlpha: 1,
+    previewDotPx: 2.5,
+  },
+];
+
+const normalizeHex = (value = "") => {
+  const cleaned = String(value).trim().replace(/^#/, "");
+
+  if (/^[0-9a-fA-F]{3}$/.test(cleaned)) {
+    return `#${cleaned
+        .split("")
+        .map((channel) => channel + channel)
+        .join("")
+        .toUpperCase()}`;
+  }
+
+  if (/^[0-9a-fA-F]{6}$/.test(cleaned)) {
+    return `#${cleaned.toUpperCase()}`;
+  }
+
+  return null;
+};
+
+const hexToRgb255 = (hex) => {
+  const normalized = normalizeHex(hex) ?? "#000000";
+
+  return {
+    r: Number.parseInt(normalized.slice(1, 3), 16),
+    g: Number.parseInt(normalized.slice(3, 5), 16),
+    b: Number.parseInt(normalized.slice(5, 7), 16),
+  };
+};
+
+const hexToRgba = (hex, alpha = 1) => {
+  const { r, g, b } = hexToRgb255(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+const hexToPdfRgb = (hex) => {
+  const { r, g, b } = hexToRgb255(hex);
+  return rgb(r / 255, g / 255, b / 255);
+};
+
+const getRelativeLuminance = (hex) => {
+  const { r, g, b } = hexToRgb255(hex);
+  const toLinear = (channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.03928
+        ? normalized / 12.92
+        : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+
+  return (
+      0.2126 * toLinear(r) +
+      0.7152 * toLinear(g) +
+      0.0722 * toLinear(b)
+  );
+};
+
+/*
+ * WCAG contrast midpoint (~0.179) splits colors where white ink reads better
+ * than dark ink.
+ */
+const isDarkColor = (hex) => getRelativeLuminance(hex) < 0.18;
+
+const getContrastRatio = (hexA, hexB) => {
+  const luminanceA = getRelativeLuminance(hexA);
+  const luminanceB = getRelativeLuminance(hexB);
+  const lighter = Math.max(luminanceA, luminanceB);
+  const darker = Math.min(luminanceA, luminanceB);
+
+  return (lighter + 0.05) / (darker + 0.05);
+};
+
+/* -------------------------------------------------------------------------- */
 /*                           Heading detection logic                           */
 /* -------------------------------------------------------------------------- */
 
@@ -781,6 +922,79 @@ function Segmented({ label, options, value, onChange, disabled = false }) {
   );
 }
 
+function ColorSelector({
+                         label,
+                         presets,
+                         value,
+                         onChange,
+                         disabled = false,
+                         customLabel = "Custom color",
+                         hint = "",
+                       }) {
+  const normalizedValue = normalizeHex(value) ?? "#000000";
+  const isCustom = !presets.some(
+      (preset) => preset.hex.toUpperCase() === normalizedValue,
+  );
+
+  return (
+      <div className="control-row">
+        <span className="control-row__label">
+          {label}
+          {hint ? <small className="control-row__hint">{hint}</small> : null}
+        </span>
+
+        <div
+            className={`color-bar ${disabled ? "is-disabled" : ""}`}
+            role="group"
+            aria-label={label}
+        >
+          <div className="color-swatches">
+            {presets.map((preset) => {
+              const isActive =
+                  preset.hex.toUpperCase() === normalizedValue;
+
+              return (
+                  <button
+                      key={preset.id}
+                      type="button"
+                      className={`color-swatch ${isActive ? "is-active" : ""}`}
+                      style={{ "--swatch": preset.hex }}
+                      disabled={disabled}
+                      aria-label={`${preset.label} (${preset.hex})`}
+                      aria-pressed={isActive}
+                      title={`${preset.label} · ${preset.hex}`}
+                      onClick={() => onChange(preset.hex)}
+                  />
+              );
+            })}
+          </div>
+
+          <label
+              className={`color-custom ${isCustom ? "is-active" : ""} ${
+                  disabled ? "is-disabled" : ""
+              }`}
+              title={`${customLabel} · ${normalizedValue}`}
+          >
+            <input
+                type="color"
+                className="color-custom__input"
+                value={normalizedValue}
+                disabled={disabled}
+                aria-label={customLabel}
+                onChange={(event) => onChange(event.target.value)}
+            />
+            <span
+                className="color-custom__dot"
+                style={{ "--swatch": normalizedValue }}
+                aria-hidden="true"
+            />
+            <span className="color-custom__hex">{normalizedValue}</span>
+          </label>
+        </div>
+      </div>
+  );
+}
+
 function Toggle({ enabled, onChange, label, description }) {
   return (
       <div className="toggle-row">
@@ -966,6 +1180,13 @@ export default function App() {
 
   const [paperStyle, setPaperStyle] = useState("grid");
   const [paperSpacing, setPaperSpacing] = useState("5");
+  const [patternThickness, setPatternThickness] = useState("regular");
+  const [backgroundColor, setBackgroundColor] = useState(
+      DEFAULT_BACKGROUND_COLOR,
+  );
+  const [patternColor, setPatternColor] = useState(
+      LIGHT_PATTERN_PRESETS[0].hex,
+  );
   const [showBorder, setShowBorder] = useState(false);
 
   const [outlineMode, setOutlineMode] = useState("detect");
@@ -989,6 +1210,22 @@ export default function App() {
     };
   }, [resultUrl]);
 
+  const darkBackground = isDarkColor(backgroundColor);
+
+  const activePatternPresets = darkBackground
+      ? DARK_PATTERN_PRESETS
+      : LIGHT_PATTERN_PRESETS;
+
+  const activeThickness = useMemo(
+      () =>
+          THICKNESS_OPTIONS.find(
+              (option) => option.value === patternThickness,
+          ) ?? THICKNESS_OPTIONS[1],
+      [patternThickness],
+  );
+
+  const borderColorHex = darkBackground ? "#8A94A0" : "#4D5966";
+
   const pageAspect = useMemo(
       () => ({
         width:
@@ -1007,32 +1244,57 @@ export default function App() {
   );
 
   const previewPattern = useMemo(() => {
+    const baseStyle = {
+      backgroundColor,
+    };
+
     if (paperStyle === "blank") {
-      return {};
+      return baseStyle;
     }
+
+    const previewSpacingPx =
+        paperSpacing === "2.5"
+            ? 10
+            : paperSpacing === "10"
+                ? 24
+                : 15;
+
+    const stroke = hexToRgba(
+        patternColor,
+        activeThickness.previewAlpha,
+    );
 
     if (paperStyle === "lines") {
       return {
-        backgroundImage:
-            "linear-gradient(var(--pdf-grid-line) 1px, transparent 1px)",
-        backgroundSize: "14px 14px",
+        ...baseStyle,
+        backgroundImage: `linear-gradient(${stroke} ${activeThickness.previewLinePx}px, transparent ${activeThickness.previewLinePx}px)`,
+        backgroundSize: `${previewSpacingPx}px ${previewSpacingPx}px`,
       };
     }
 
     if (paperStyle === "dots") {
+      const dotRadius = activeThickness.previewDotPx;
       return {
-        backgroundImage:
-            "radial-gradient(var(--pdf-dot-color) 1px, transparent 1px)",
-        backgroundSize: "14px 14px",
+        ...baseStyle,
+        backgroundImage: `radial-gradient(circle, ${stroke} ${dotRadius}px, transparent ${
+            dotRadius + 0.35
+        }px)`,
+        backgroundSize: `${previewSpacingPx}px ${previewSpacingPx}px`,
       };
     }
 
     return {
-      backgroundImage:
-          "linear-gradient(var(--pdf-grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--pdf-grid-line) 1px, transparent 1px)",
-      backgroundSize: "14px 14px",
+      ...baseStyle,
+      backgroundImage: `linear-gradient(${stroke} ${activeThickness.previewLinePx}px, transparent ${activeThickness.previewLinePx}px), linear-gradient(90deg, ${stroke} ${activeThickness.previewLinePx}px, transparent ${activeThickness.previewLinePx}px)`,
+      backgroundSize: `${previewSpacingPx}px ${previewSpacingPx}px`,
     };
-  }, [paperStyle]);
+  }, [
+    activeThickness,
+    backgroundColor,
+    paperSpacing,
+    paperStyle,
+    patternColor,
+  ]);
 
   const originalPagePosition = useMemo(() => {
     const totalHorizontal = 100 + leftMargin + rightMargin;
@@ -1044,10 +1306,11 @@ export default function App() {
       top: `${(topMargin / totalVertical) * 100}%`,
       bottom: `${(bottomMargin / totalVertical) * 100}%`,
       border: showBorder
-          ? "1px solid var(--pdf-border-color)"
+          ? `1px solid ${borderColorHex}`
           : "none",
     };
   }, [
+    borderColorHex,
     bottomMargin,
     leftMargin,
     rightMargin,
@@ -1062,6 +1325,61 @@ export default function App() {
 
     setResultUrl("");
     setResultName("");
+  };
+
+  const handleBackgroundColorChange = (nextColor) => {
+    const normalized = normalizeHex(nextColor);
+
+    if (!normalized) {
+      return;
+    }
+
+    const wasDark = isDarkColor(backgroundColor);
+    const willBeDark = isDarkColor(normalized);
+
+    setBackgroundColor(normalized);
+    clearResult();
+
+    if (wasDark !== willBeDark) {
+      const previousPalette = wasDark
+          ? DARK_PATTERN_PRESETS
+          : LIGHT_PATTERN_PRESETS;
+      const nextPalette = willBeDark
+          ? DARK_PATTERN_PRESETS
+          : LIGHT_PATTERN_PRESETS;
+
+      const matchedPreset = previousPalette.find(
+          (preset) =>
+              preset.hex.toUpperCase() === patternColor.toUpperCase(),
+      );
+
+      if (matchedPreset) {
+        const counterpart = nextPalette.find(
+            (preset) => preset.id === matchedPreset.id,
+        );
+        setPatternColor(
+            counterpart ? counterpart.hex : nextPalette[0].hex,
+        );
+      } else if (getContrastRatio(patternColor, normalized) < 1.6) {
+        setPatternColor(nextPalette[0].hex);
+      }
+    }
+  };
+
+  const handlePatternColorChange = (nextColor) => {
+    const normalized = normalizeHex(nextColor);
+
+    if (!normalized) {
+      return;
+    }
+
+    setPatternColor(normalized);
+    clearResult();
+  };
+
+  const handleThicknessChange = (nextThickness) => {
+    setPatternThickness(nextThickness);
+    clearResult();
   };
 
   const resetFile = () => {
@@ -1232,7 +1550,9 @@ export default function App() {
                                 marginTop,
                                 marginBottom,
                                 step,
-                                patternColor,
+                                patternPdfColor,
+                                lineThickness,
+                                dotRadius,
                               }) => {
     const originalLeft = marginLeft;
     const originalRight = marginLeft + originalWidth;
@@ -1240,9 +1560,9 @@ export default function App() {
     const originalTop = marginBottom + originalHeight;
 
     const lineOptions = {
-      thickness: 0.25,
-      color: patternColor,
-      opacity: 0.72,
+      thickness: lineThickness,
+      color: patternPdfColor,
+      opacity: 1,
     };
 
     const drawVerticalLine = (x) => {
@@ -1330,9 +1650,9 @@ export default function App() {
             page.drawCircle({
               x,
               y,
-              size: 0.65,
-              color: patternColor,
-              opacity: 0.82,
+              size: dotRadius,
+              color: patternPdfColor,
+              opacity: 1,
             });
           }
         }
@@ -1381,8 +1701,9 @@ export default function App() {
           Math.max(2, Number(paperSpacing)) *
           millimetresToPoints;
 
-      const patternColor = rgb(0.76, 0.82, 0.88);
-      const borderColor = rgb(0.3, 0.36, 0.43);
+      const backgroundPdfColor = hexToPdfRgb(backgroundColor);
+      const patternPdfColor = hexToPdfRgb(patternColor);
+      const borderPdfColor = hexToPdfRgb(borderColorHex);
       const white = rgb(1, 1, 1);
 
       for (
@@ -1425,14 +1746,14 @@ export default function App() {
         ]);
 
         /*
-         * Paint the complete background white.
+         * Paint the complete background with the selected paper color.
          */
         page.drawRectangle({
           x: 0,
           y: 0,
           width: newWidth,
           height: newHeight,
-          color: white,
+          color: backgroundPdfColor,
         });
 
         /*
@@ -1451,9 +1772,23 @@ export default function App() {
             marginTop,
             marginBottom,
             step: spacingInPoints,
-            patternColor,
+            patternPdfColor,
+            lineThickness: activeThickness.lineWidthPt,
+            dotRadius: activeThickness.dotRadiusPt,
           });
         }
+
+        /*
+         * Keep a white backing behind the original page so transparent PDFs
+         * remain legible when a darker writing-paper background is chosen.
+         */
+        page.drawRectangle({
+          x: marginLeft,
+          y: marginBottom,
+          width: originalWidth,
+          height: originalHeight,
+          color: white,
+        });
 
         /*
          * Place the complete original PDF page inside the new page.
@@ -1484,7 +1819,7 @@ export default function App() {
                 newHeight - outerInset * 2,
             ),
             borderWidth: 0.9,
-            borderColor,
+            borderColor: borderPdfColor,
           });
 
           page.drawRectangle({
@@ -1493,7 +1828,7 @@ export default function App() {
             width: originalWidth,
             height: originalHeight,
             borderWidth: 0.65,
-            borderColor,
+            borderColor: borderPdfColor,
           });
         }
 
@@ -1887,6 +2222,35 @@ export default function App() {
                 ]}
             />
 
+            <Segmented
+                label="weight"
+                value={patternThickness}
+                onChange={handleThicknessChange}
+                disabled={paperStyle === "blank"}
+                options={THICKNESS_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+            />
+
+            <ColorSelector
+                label="page bg"
+                presets={BACKGROUND_PRESETS}
+                value={backgroundColor}
+                onChange={handleBackgroundColorChange}
+                customLabel="Custom background color"
+            />
+
+            <ColorSelector
+                label={paperStyle === "blank" ? "pattern" : paperStyle}
+                hint={darkBackground ? "dark bg" : "light bg"}
+                presets={activePatternPresets}
+                value={patternColor}
+                onChange={handlePatternColorChange}
+                disabled={paperStyle === "blank"}
+                customLabel={`Custom ${paperStyle === "blank" ? "pattern" : paperStyle} color`}
+            />
+
             <Toggle
                 enabled={showBorder}
                 onChange={setShowBorder}
@@ -1907,7 +2271,7 @@ export default function App() {
 
             <div className="preview-stage">
               <div
-                  className="preview-page"
+                  className={`preview-page ${darkBackground ? "is-dark" : ""}`}
                   style={{
                     "--page-ratio": pageAspect.width / pageAspect.height,
                     ...previewPattern,
@@ -1933,7 +2297,12 @@ export default function App() {
                   </div>
                 </div>
 
-                {showBorder && <div className="preview-outer-border" />}
+                {showBorder && (
+                    <div
+                        className="preview-outer-border"
+                        style={{ borderColor: borderColorHex }}
+                    />
+                )}
               </div>
             </div>
 
